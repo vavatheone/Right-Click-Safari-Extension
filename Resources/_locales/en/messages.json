@@ -1,0 +1,10 @@
+{
+    "extension_name": {
+        "message": "Right-Click",
+        "description": "The display name for the extension."
+    },
+    "extension_description": {
+        "message": "This Right-Click Safari extension lets you perform a true right-click on your iPhone or iPad.",
+        "description": "Description of what the extension does."
+    }
+}
