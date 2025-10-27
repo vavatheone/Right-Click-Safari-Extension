@@ -16,25 +16,47 @@ jobs:
       - name: Set up Xcode
         run: sudo xcode-select --switch /Applications/Xcode.app
 
-      # Convert the Safari Web Extension (point to the correct folder)
+      # 🧭 Debug directory structure for visibility
+      - name: Debug path
+        run: |
+          echo "Current directory:"
+          pwd
+          echo "Repo structure:"
+          ls -R
+
+      # 🧩 Validate manifest.json before converting
+      - name: Validate manifest.json
+        run: |
+          cd $GITHUB_WORKSPACE/Right-Click-Safari-Extension/SafariWebExtension
+          echo "Validating manifest.json..."
+          if [ ! -f manifest.json ]; then
+            echo "❌ Error: manifest.json not found in SafariWebExtension/"
+            exit 1
+          fi
+          cat manifest.json | python3 -m json.tool > /dev/null
+          echo "✅ manifest.json is valid JSON."
+
+      # 🧱 Convert the Safari Web Extension to an Xcode project
       - name: Convert Safari Web Extension
         run: |
-          mkdir build
+          cd $GITHUB_WORKSPACE/Right-Click-Safari-Extension
+          mkdir -p build
           echo "Running converter on SafariWebExtension folder..."
           xcrun safari-web-extension-converter SafariWebExtension \
             --no-prompt \
             --project-location build
 
-      # Debug: show what was produced
+      # 🔍 List converter output for verification
       - name: List converter output
         run: |
+          cd $GITHUB_WORKSPACE/Right-Click-Safari-Extension/build
           echo "=== Converter output ==="
-          ls -R build
+          ls -R
 
-      # Build iOS app (unsigned / no signing)
+      # ⚙️ Build iOS app (unsigned, for simulator/testing)
       - name: Build iOS app
         run: |
-          cd build/*
+          cd $GITHUB_WORKSPACE/Right-Click-Safari-Extension/build/*
           PROJECT_NAME=$(ls | grep .xcodeproj | sed 's/.xcodeproj//')
           echo "Detected project: $PROJECT_NAME"
           xcodebuild -project "$PROJECT_NAME.xcodeproj" \
@@ -46,10 +68,10 @@ jobs:
                      CODE_SIGNING_REQUIRED=NO \
                      CODE_SIGNING_ALLOWED=NO
 
-      # Package .ipa manually
+      # 📦 Package the built app into an IPA
       - name: Export .ipa
         run: |
-          cd build
+          cd $GITHUB_WORKSPACE/Right-Click-Safari-Extension/build
           mkdir -p output/Payload
           APP_PATH=$(find .. -name "*.app" -type d | head -n 1)
           echo "App found at: $APP_PATH"
@@ -57,9 +79,9 @@ jobs:
           cd output
           zip -r "../safari-extension.ipa" Payload
 
-      # Upload artifact
+      # ⬆️ Upload artifact so you can download the .ipa file
       - name: Upload .ipa artifact
         uses: actions/upload-artifact@v4
         with:
           name: safari-extension-ipa
-          path: build/safari-extension.ipa
+          path: Right-Click-Safari-Extension/build/safari-extension.ipa
