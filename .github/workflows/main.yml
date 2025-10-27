@@ -43,7 +43,9 @@ jobs:
           echo "Running converter on SafariWebExtension folder..."
           xcrun safari-web-extension-converter SafariWebExtension \
             --no-prompt \
-            --project-location build
+            --project-location build \
+            --bundle-identifier com.vavatheone.rightclicksafari \
+            --app-name "RightClickSafari"
 
       # 🔍 List converter output
       - name: List converter output
@@ -51,35 +53,78 @@ jobs:
           echo "=== Converter output ==="
           ls -R build
 
-      # ⚙️ Build iOS app (unsigned)
+      # 📄 Create development certificate
+      - name: Create development certificate
+        run: |
+          security create-keychain -p github_actions build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p github_actions build.keychain
+          security set-keychain-settings -t 3600 -l ~/Library/Keychains/build.keychain
+
+      # ⚙️ Build iOS app (archive)
       - name: Build iOS app
         run: |
           cd build/*
           PROJECT_NAME=$(ls | grep .xcodeproj | sed 's/.xcodeproj//')
           echo "Detected project: $PROJECT_NAME"
-          xcodebuild -project "$PROJECT_NAME.xcodeproj" \
-                     -scheme "$PROJECT_NAME (iOS)" \
-                     -configuration Release \
-                     -destination 'generic/platform=iOS Simulator' \
-                     clean build \
-                     CODE_SIGN_IDENTITY="" \
-                     CODE_SIGNING_REQUIRED=NO \
-                     CODE_SIGNING_ALLOWED=NO
+          
+          # Create archive
+          xcodebuild archive \
+            -project "$PROJECT_NAME.xcodeproj" \
+            -scheme "$PROJECT_NAME (iOS)" \
+            -sdk iphoneos \
+            -configuration Release \
+            -archivePath ../build/App.xcarchive \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            DEVELOPMENT_TEAM="" \
+            PROVISIONING_PROFILE_SPECIFIER=""
 
-      # 📦 Package .ipa manually
+      # 📱 Create exportOptions.plist
+      - name: Create exportOptions.plist
+        run: |
+          cat > build/exportOptions.plist << EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>method</key>
+              <string>development</string>
+              <key>compileBitcode</key>
+              <false/>
+              <key>signingStyle</key>
+              <string>automatic</string>
+              <key>stripSwiftSymbols</key>
+              <true/>
+              <key>thinning</key>
+              <string>&lt;none&gt;</string>
+          </dict>
+          </plist>
+          EOF
+
+      # 📦 Export .ipa
       - name: Export .ipa
         run: |
-          cd build
-          mkdir -p output/Payload
-          APP_PATH=$(find .. -name "*.app" -type d | head -n 1)
-          echo "App found at: $APP_PATH"
-          cp -R "$APP_PATH" output/Payload/
-          cd output
-          zip -r "../safari-extension.ipa" Payload
+          xcodebuild -exportArchive \
+            -archivePath build/App.xcarchive \
+            -exportPath build/export \
+            -exportOptionsPlist build/exportOptions.plist \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            DEVELOPMENT_TEAM="" \
+            PROVISIONING_PROFILE_SPECIFIER=""
+
+      # 📋 List exported files
+      - name: List exported files
+        run: |
+          echo "=== Exported files ==="
+          ls -R build/export
 
       # ⬆️ Upload .ipa artifact
       - name: Upload .ipa artifact
         uses: actions/upload-artifact@v4
         with:
           name: safari-extension-ipa
-          path: build/safari-extension.ipa
+          path: build/export
