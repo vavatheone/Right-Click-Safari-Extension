@@ -1,130 +1,94 @@
-name: Build Safari Web Extension
+# --- locate extension directory and validate manifest.json ---
+- name: Locate Safari extension directory and validate manifest.json
+  run: |
+    set -euo pipefail
 
-on:
-  push:
-    branches: [ main ]
-  workflow_dispatch:
+    # Candidate folder names to check quickly
+    CANDIDATES=(SafariWebExtension "Safari Web Extension" Safari-Extension extension src webextension WebExtension)
+    FOUND=""
+    for d in "${CANDIDATES[@]}"; do
+      if [ -d "$d" ] && [ -f "$d/manifest.json" ]; then
+        FOUND="$d"
+        break
+      fi
+    done
 
-jobs:
-  build:
-    runs-on: macos-latest
+    # Fallback: search the repository for manifest.json tracked by git
+    if [ -z "$FOUND" ]; then
+      MANIFEST_PATH=$(git ls-files | grep -i 'manifest.json' | head -n1 || true)
+      if [ -n "$MANIFEST_PATH" ]; then
+        FOUND=$(dirname "$MANIFEST_PATH")
+      fi
+    fi
 
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+    if [ -z "$FOUND" ]; then
+      echo "❌ manifest.json not found in repository. Looked in: ${CANDIDATES[*]} and git index."
+      echo "Run 'git ls-files | grep -i manifest.json' locally to see where your manifest is."
+      exit 1
+    fi
 
-      - name: Set up Xcode
-        run: sudo xcode-select --switch /Applications/Xcode.app
+    echo "Found manifest.json in: $FOUND"
+    # Validate JSON
+    if ! python3 -m json.tool "$FOUND/manifest.json" > /dev/null 2>&1; then
+      echo "❌ manifest.json found but it's not valid JSON: $FOUND/manifest.json"
+      exit 1
+    fi
+    echo "✅ manifest.json is valid JSON."
 
-      # 🧭 Debug directory structure for clarity
-      - name: Debug path
-        run: |
-          echo "Current directory:"
-          pwd
-          echo "Repo structure:"
-          ls -R
+    # Expose for later steps
+    echo "EXT_DIR=$FOUND" >> "$GITHUB_ENV"
 
-      # 🧩 Validate manifest.json before conversion
-      - name: Validate manifest.json
-        run: |
-          cd SafariWebExtension
-          echo "Validating manifest.json..."
-          if [ ! -f manifest.json ]; then
-            echo "❌ Error: manifest.json not found in SafariWebExtension/"
-            exit 1
-          fi
-          cat manifest.json | python3 -m json.tool > /dev/null
-          echo "✅ manifest.json is valid JSON."
+# --- Convert Safari Web Extension (use EXT_DIR) ---
+- name: Convert Safari Web Extension
+  run: |
+    set -euo pipefail
+    if [ -z "${EXT_DIR:-}" ]; then
+      echo "EXT_DIR not set - aborting"
+      exit 1
+    fi
 
-      # 🧱 Convert Safari Web Extension → Xcode project
-      - name: Convert Safari Web Extension
-        run: |
-          mkdir -p build
-          echo "Running converter on SafariWebExtension folder..."
-          xcrun safari-web-extension-converter SafariWebExtension \
-            --no-prompt \
-            --project-location build \
-            --bundle-identifier com.vavatheone.rightclicksafari \
-            --app-name "RightClickSafari"
+    mkdir -p build
+    echo "Running converter on $EXT_DIR ..."
+    if ! command -v xcrun >/dev/null 2>&1; then
+      echo "❌ xcrun not found on runner path"
+      exit 1
+    fi
 
-      # 🔍 List converter output
-      - name: List converter output
-        run: |
-          echo "=== Converter output ==="
-          ls -R build
+    xcrun safari-web-extension-converter "$EXT_DIR" \
+      --no-prompt \
+      --project-location build \
+      --bundle-identifier com.vavatheone.rightclicksafari \
+      --app-name "RightClickSafari"
 
-      # 📄 Create development certificate
-      - name: Create development certificate
-        run: |
-          security create-keychain -p github_actions build.keychain
-          security default-keychain -s build.keychain
-          security unlock-keychain -p github_actions build.keychain
-          security set-keychain-settings -t 3600 -l ~/Library/Keychains/build.keychain
+# --- Build iOS app (archive) using detected .xcodeproj ---
+- name: Build iOS app
+  run: |
+    set -euo pipefail
+    # find the generated xcodeproj
+    XCODEPROJ=$(find build -maxdepth 2 -name "*.xcodeproj" -print -quit || true)
+    if [ -z "$XCODEPROJ" ]; then
+      echo "❌ No .xcodeproj found under build/. Converter may have failed."
+      ls -R build || true
+      exit 1
+    fi
 
-      # ⚙️ Build iOS app (archive)
-      - name: Build iOS app
-        run: |
-          cd build/*
-          PROJECT_NAME=$(ls | grep .xcodeproj | sed 's/.xcodeproj//')
-          echo "Detected project: $PROJECT_NAME"
-          
-          # Create archive
-          xcodebuild archive \
-            -project "$PROJECT_NAME.xcodeproj" \
-            -scheme "$PROJECT_NAME (iOS)" \
-            -sdk iphoneos \
-            -configuration Release \
-            -archivePath ../build/App.xcarchive \
-            CODE_SIGN_IDENTITY="" \
-            CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGNING_ALLOWED=NO \
-            DEVELOPMENT_TEAM="" \
-            PROVISIONING_PROFILE_SPECIFIER=""
+    echo "Using Xcode project: $XCODEPROJ"
+    PROJECT_NAME=$(basename "$XCODEPROJ" .xcodeproj)
+    echo "Detected project name: $PROJECT_NAME"
 
-      # 📱 Create exportOptions.plist
-      - name: Create exportOptions.plist
-        run: |
-          cat > build/exportOptions.plist << EOF
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0">
-          <dict>
-              <key>method</key>
-              <string>development</string>
-              <key>compileBitcode</key>
-              <false/>
-              <key>signingStyle</key>
-              <string>automatic</string>
-              <key>stripSwiftSymbols</key>
-              <true/>
-              <key>thinning</key>
-              <string>&lt;none&gt;</string>
-          </dict>
-          </plist>
-          EOF
+    # Optionally list schemes to help debugging
+    echo "Available schemes:"
+    xcodebuild -list -project "$XCODEPROJ" || true
 
-      # 📦 Export .ipa
-      - name: Export .ipa
-        run: |
-          xcodebuild -exportArchive \
-            -archivePath build/App.xcarchive \
-            -exportPath build/export \
-            -exportOptionsPlist build/exportOptions.plist \
-            CODE_SIGN_IDENTITY="" \
-            CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGNING_ALLOWED=NO \
-            DEVELOPMENT_TEAM="" \
-            PROVISIONING_PROFILE_SPECIFIER=""
-
-      # 📋 List exported files
-      - name: List exported files
-        run: |
-          echo "=== Exported files ==="
-          ls -R build/export
-
-      # ⬆️ Upload .ipa artifact
-      - name: Upload .ipa artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: safari-extension-ipa
-          path: build/export
+    # Create archive
+    xcodebuild archive \
+      -project "$XCODEPROJ" \
+      -scheme "$PROJECT_NAME (iOS)" \
+      -sdk iphoneos \
+      -configuration Release \
+      -archivePath build/App.xcarchive \
+      CODE_SIGN_IDENTITY="" \
+      CODE_SIGNING_REQUIRED=NO \
+      CODE_SIGNING_ALLOWED=NO \
+      DEVELOPMENT_TEAM="" \
+      PROVISIONING_PROFILE_SPECIFIER=""
