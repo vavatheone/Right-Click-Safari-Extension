@@ -1,0 +1,65 @@
+name: Build Safari Web Extension
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Xcode
+        run: sudo xcode-select --switch /Applications/Xcode.app
+
+      # Convert the Safari Web Extension (point to the correct folder)
+      - name: Convert Safari Web Extension
+        run: |
+          mkdir build
+          echo "Running converter on SafariWebExtension folder..."
+          xcrun safari-web-extension-converter SafariWebExtension \
+            --no-prompt \
+            --project-location build
+
+      # Debug: show what was produced
+      - name: List converter output
+        run: |
+          echo "=== Converter output ==="
+          ls -R build
+
+      # Build iOS app (unsigned / no signing)
+      - name: Build iOS app
+        run: |
+          cd build/*
+          PROJECT_NAME=$(ls | grep .xcodeproj | sed 's/.xcodeproj//')
+          echo "Detected project: $PROJECT_NAME"
+          xcodebuild -project "$PROJECT_NAME.xcodeproj" \
+                     -scheme "$PROJECT_NAME (iOS)" \
+                     -configuration Release \
+                     -destination 'generic/platform=iOS Simulator' \
+                     clean build \
+                     CODE_SIGN_IDENTITY="" \
+                     CODE_SIGNING_REQUIRED=NO \
+                     CODE_SIGNING_ALLOWED=NO
+
+      # Package .ipa manually
+      - name: Export .ipa
+        run: |
+          cd build
+          mkdir -p output/Payload
+          APP_PATH=$(find .. -name "*.app" -type d | head -n 1)
+          echo "App found at: $APP_PATH"
+          cp -R "$APP_PATH" output/Payload/
+          cd output
+          zip -r "../safari-extension.ipa" Payload
+
+      # Upload artifact
+      - name: Upload .ipa artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: safari-extension-ipa
+          path: build/safari-extension.ipa
