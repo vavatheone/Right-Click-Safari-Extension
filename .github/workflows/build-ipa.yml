@@ -1,15 +1,17 @@
+ (cd "$(git rev-parse --show-toplevel)" && git apply --3way <<'EOF' 
 diff --git a/.github/workflows/build-ipa.yml b/.github/workflows/build-ipa.yml
 new file mode 100644
-index 0000000000000000000000000000000000000000..790efbd8a58f185852b0cdce664f59bb1a39ab70
+index 0000000000000000000000000000000000000000..d2be60f97728896edb81c022d2096e52173dc0f7
 --- /dev/null
 +++ b/.github/workflows/build-ipa.yml
-@@ -0,0 +1,95 @@
+@@ -0,0 +1,96 @@
 +name: Build IPA
 +
 +on:
 +  workflow_dispatch:
 +  push:
-+    branches: [ main ]
++    branches:
++      - main
 +
 +env:
 +  PROJECT: Right-Click-Safari-Extension.xcodeproj
@@ -99,3 +101,6 @@ index 0000000000000000000000000000000000000000..790efbd8a58f185852b0cdce664f59bb
 +        with:
 +          name: RightClick-IPA
 +          path: ${{ env.EXPORT_PATH }}/*.ipa
+ 
+EOF
+)
