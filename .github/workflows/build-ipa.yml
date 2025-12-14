@@ -1,14 +1,14 @@
  (cd "$(git rev-parse --show-toplevel)" && git apply --3way <<'EOF' 
 diff --git a/.github/workflows/build-ipa.yml b/.github/workflows/build-ipa.yml
 new file mode 100644
-index 0000000000000000000000000000000000000000..d2be60f97728896edb81c022d2096e52173dc0f7
+index 0000000000000000000000000000000000000000..b9f1505913d8e1dd25d80b85a45764e14e02c853
 --- /dev/null
 +++ b/.github/workflows/build-ipa.yml
 @@ -0,0 +1,96 @@
 +name: Build IPA
 +
 +on:
-+  workflow_dispatch:
++  workflow_dispatch: {}
 +  push:
 +    branches:
 +      - main
